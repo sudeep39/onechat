@@ -1,0 +1,271 @@
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Apache Tomcat WebSocket Examples: OneChat</title>
+    <style type="text/css">
+        #connect-container {
+            float: left;
+            width: 400px
+        }
+
+        #connect-container div {
+            padding: 5px;
+        }
+
+        #console-container {
+            float: left;
+            margin-left: 15px;
+            width: 400px;
+        }
+
+        #console {
+            border: 1px solid #CCCCCC;
+            border-right-color: #999999;
+            border-bottom-color: #999999;
+            height: 170px;
+            overflow-y: scroll;
+            padding: 5px;
+            width: 100%;
+        }
+
+        #console p {
+            padding: 0;
+            margin: 0;
+        }
+
+        #user-container {
+			float: left;
+			margin-left: 15px;
+			width: 200px;
+        }
+
+        #users {
+			border: 1px solid #CCCCCC;
+			border-right-color: #999999;
+			border-bottom-color: #999999;
+			height: 170px;
+			overflow-y: scroll;
+			padding: 5px;
+			width: 100%;
+        }
+
+        #users p {
+			padding: 0;
+			margin: 0;
+        }
+    </style>
+    <script src="http://cdn.sockjs.org/sockjs-0.3.min.js"></script>
+    <script type="text/javascript">
+        
+        function setConnected(connected) {
+            $('#connect').disabled = connected;
+            $('#disconnect').disabled = !connected;
+            $('#onechat').disabled = !connected;
+        }
+
+		var ws;
+		var me;
+		var friend;
+		var msg = new Object();
+		
+        function connect() {
+            var handle = prompt('Choose a handle?');
+			var target = $('#target').value;
+            ws = new SockJS(target);
+            ws.onopen = function (event) {
+                var id = session(ws);
+				setConnected(true);
+				me = { "id":id, "handle":handle };
+				addUser( me, true );
+            };
+            ws.onmessage = function (event) {
+				handleMessage(event);
+            };
+            ws.onclose = function () {
+                setConnected(false);
+            };
+        }
+
+        var session = function(ws) {
+            var url = ws._transport.url;
+            var extract = url.match(/onechat\/(.*)\/websocket/).pop();
+			return extract.split('/')[1];			
+        }
+		
+		function handleMessage(event) {
+			msg = JSON.parse(event.data);
+			
+			switch(msg.type) {
+				case "user_added" :
+					var user = msg.body;
+					addUser(user);
+					break;
+				case "user_listing" :
+					var users = msg.body;
+					for(var i=0; i< users.length; i++){
+						addUser(users[i]);
+					}
+					break;
+				case "pair" :
+					var text = "Would you like to chat with "+ msg.from.handle;
+					var result = confirm(text);
+					if(result){
+						friend = msg.from;
+					}
+					break;
+				case "chat" :
+					log(msg.from.handle +': '+ msg.body);
+					break;
+				case "user_removed" :
+					var user = msg.body;
+					removeUser(user);
+					break;
+			}
+		}
+
+        function disconnect() {
+			removeUser(me);
+			send(me, me, 'user_removed')
+			if (ws != null) {
+                ws.close();
+                ws = null;
+            }
+            setConnected(false);
+        }
+		
+		window.onload = function() {
+			 $('#message').addEventListener("keydown", function (e) {
+				//checks whether the pressed key is "Enter"
+				if (e.keyCode === 13) {
+					onechat(e);
+				}
+			});
+		};
+		
+        function onechat() {
+            if (ws != null) {
+                var text = $('#message').value;
+				log('me: ' + text);
+				$('#message').value='';
+				send(me, friend, 'chat', text);
+            } else {
+                alert('WebSocket connection not established, please connect.');
+            }
+        }
+		
+		var $ = function (selector) {
+			return document.querySelector(selector);
+		};
+		
+		var send = function (msg) {
+			var message = JSON.stringify(msg);
+			ws.send(message);
+		};
+		
+		var send = function (from, to, type) {
+			send(me, to, type, '', Date.now);
+		};
+		
+		var send = function (from, to, type, text) {
+			send(me, to, type, text, Date.now);
+		};
+		
+		var send = function (from, to, type, body, date) {
+			msg.from = from;
+			msg.to = to;
+			msg.type = type;
+			msg.body = body;
+			msg.date = date;
+			var message = JSON.stringify(msg);
+			ws.send(message);
+		};
+		
+		function pair(user) {
+			if(me.id != user.id) {
+				friend = user;
+				send(me, user, 'pair');
+			}
+		}
+		
+		function addUser(user, push) {
+			var users = $('#users');
+			var li = document.createElement('li');
+			li.innerHTML = user.handle;
+			li.user = user;
+			li.onclick = function() {pair(this.user);};
+			users.appendChild(li);
+			if(push) {
+				send(user, user, 'user_added');
+			}
+            users.scrollTop = users.scrollHeight;
+        }
+
+		function removeUser(user) {
+			var users = $('#users');
+			NodeList.prototype.forEach = Array.prototype.forEach
+			var children = users.childNodes;
+			children.forEach(function(item){
+				if(item.user.id == user.id) {
+					users.removeChild(item);
+				}
+			});
+            users.scrollTop = users.scrollHeight;
+        }
+		
+        function log(message) {
+            var console = $('#console');
+            var p = document.createElement('p');
+            p.style.wordWrap = 'break-word';
+            p.appendChild(document.createTextNode(message));
+            console.appendChild(p);
+            while (console.childNodes.length > 25) {
+                console.removeChild(console.firstChild);
+            }
+            console.scrollTop = console.scrollHeight;
+        }
+    </script>
+</head>
+<body>
+<noscript><h2 style="color: #ff0000">Seems your browser doesn't support Javascript! Websockets rely on Javascript being enabled. Please enable
+    Javascript and reload this page!</h2></noscript>
+<div>
+    <div id="connect-container">
+        <div>
+            <input id="target" type="text" size="40" style="width: 350px" value="/onechat"/>
+        </div>
+        <div>
+            <button id="connect" onclick="connect();">Connect</button>
+            <button id="disconnect" disabled="disabled" onclick="disconnect();">Disconnect</button>
+        </div>
+        <div>
+            <textarea id="message" style="width: 350px">Here is a message!</textarea>
+        </div>
+        <div>
+            <button id="onechat" onclick="onechat();" disabled="disabled">Send message</button>
+        </div>
+    </div>
+    <div id="console-container">
+        <div id="console"></div>
+    </div>
+	<div id="user-container">
+        <div id="users"></div>
+    </div>		
+</div>
+</body>
+</html>
